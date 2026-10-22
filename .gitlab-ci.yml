@@ -1,0 +1,9 @@
+stages: [verify]
+verify:
+  stage: verify
+  tags: ["${CI_RUNNER_TAG}"]
+  script:
+    - python3 -m unittest discover -s tests -v
+    - python3 scripts/scrub.py .
+    - python3 scripts/install.py --config examples/config.json --dry-run
+    - python3 -m compileall -q security_portal scripts tests

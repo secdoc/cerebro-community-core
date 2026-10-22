@@ -1,0 +1,11 @@
+{
+  "portal": {"title": "Cerebro", "classification": "Internal", "refresh_seconds": 60},
+  "integrations": [
+    {"id": "sample", "name": "Example feed", "category": "SOC", "connector": "json_file",
+     "path": "/var/lib/cerebro/snapshots/example.json", "collected_at_path": "collected_at",
+     "healthy_path": "healthy", "summary_paths": {"events": "events", "state": "service.status"},
+     "max_age_seconds": 600, "deep_link": "https://console.example.com/"},
+    {"id": "external", "name": "Optional HTTPS feed", "category": "SOC", "connector": "static",
+     "state": "planned", "max_age_seconds": 600, "summary": {"status": "Configure a trusted HTTPS GET feed"}}
+  ]
+}

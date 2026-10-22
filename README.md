@@ -1,0 +1,50 @@
+# Cerebro Community Core
+
+This is an installable, deliberately bounded read-only Cerebro portal for adopter-managed feeds. **It is not feature-equivalent to the private Cerebro deployment.** The private source's environment-specific producers and investigation views are not bundled. Code/configuration: Apache-2.0; documentation: CC BY 4.0. See [LICENSING.md](LICENSING.md) and [NOTICE](NOTICE).
+
+## What works
+
+- Debian 13 single-instance installer, dry-run by default; interactive config-path prompt on a TTY. Explicit `--apply` stages code, JSON config, and a disabled systemd unit. Simulation uses `--root` and never manages systemd.
+- Local JSON object snapshots, credential-free verified-HTTPS JSON GET endpoints, and explicit static planned catalog entries; exact origin allowlist for HTTPS; no redirects; bounded responses and explicit scalar summary mappings.
+- Versioned `/api/v1/overview` and `/api/v1/integrations`, `/healthz`, `/readyz`, and a simple self-hosted responsive UI. Snapshot state/freshness, summaries, provenance and connector health; entity/relationship arrays intentionally empty.
+- Loopback-only server and disabled-by-default activation behind an adopter-supplied authenticated TLS proxy. No proxy or IdP configured by this package.
+
+## Prerequisites
+
+A clean Debian 13 host with Python 3.13, systemd, root for the live install, and a separately installed TLS reverse proxy with an identity/authorization policy (OIDC forward auth or equivalent). Install the proxy and verify authenticated access *before activation*. Permit external network access only to the proxy; deny direct access to TCP 8080. Supply your own sanitized JSON snapshots under paths readable by `cerebro`, or a trusted HTTPS GET feed using system CA validation; no credential injection is supported in this edition. No pip dependencies, database, private infrastructure, or hosted fonts/scripts are needed. See the [prerequisite checklist](docs/prerequisites.md).
+
+The GitLab CI job requires a project CI variable `CI_RUNNER_TAG` set to an eligible, scoped runner tag in your own environment. The package does not register a runner or configure this variable for adopters.
+
+## Interactive mapping wizard
+
+Run `python3 scripts/wizard.py --output /path/outside/checkout/cerebro.json` to answer prompts and validate without saving. Repeat with `--apply` to write the reviewed mapping mode 0600. The wizard accepts each file path or exact HTTPS GET URL/origin and dotted scalar summary paths, never prompts for credentials, refuses overwriting and refuses saving inside the source checkout. Then pass the saved JSON to the installer. The installer itself also prompts for an existing config path when run on a TTY without `--config`.
+
+## Reproduce offline
+
+```sh
+python3 -m unittest discover -s tests -v
+python3 scripts/install.py --config examples/config.json --dry-run
+python3 scripts/install.py --root "$HOME/cerebro-simulation" --config examples/config.json --apply
+python3 scripts/install.py --root "$HOME/cerebro-simulation" --config examples/config.json --apply  # changed=0
+python3 scripts/install.py --root "$HOME/cerebro-simulation" --rollback --apply
+```
+
+`--root` simulation writes only inside the chosen new directory, does not create users or call systemd, and cannot activate. It installs an identical Python package/unit path layout, but does **not** prove Debian/systemd/proxy acceptance. To run the simulated build: `PYTHONPATH="$HOME/cerebro-simulation/opt/cerebro" python3 -m security_portal.server --config "$HOME/cerebro-simulation/etc/cerebro/config.json" --port 18080`; then GET `http://127.0.0.1:18080/healthz` and `/api/v1/overview` locally. Example snapshot is unavailable until the adopter supplies data.
+
+## Live installation and gate
+
+1. Copy `examples/config.json` outside the repo; replace every example endpoint and mapping with adopter-owned facts. Local JSON source files must be trusted, sanitized, and readable by the service user. For HTTPS feeds configure `connector: "http_json"`, `url: "https://feed.example.com/status"`, `allowed_origins: ["https://feed.example.com"]`, `method: "GET"`, and select scalar `summary_paths`. Use a trusted DNS name and system trust store. HTTPS feed URLs, origins, and deep links must not include query strings; use sanitized local snapshots for sources needing credentials. Never configure a raw/private IP, token, credential header, unreviewed redirect, or arbitrary analytics path.
+2. `sudo python3 scripts/install.py --config /path/to/reviewed.json --dry-run`; review file list. Then `sudo python3 scripts/install.py --config /path/to/reviewed.json --apply`. The unit remains disabled; verify `systemctl is-enabled cerebro.service` is not `enabled`.
+3. Independently configure and test the reverse proxy: a **TLS** listener with a real validated certificate, identity challenge, per-user authorization and no access to the upstream except loopback `127.0.0.1:8080`. Before activation, temporarily start the app manually under the unprivileged service account (`sudo -u cerebro /usr/bin/python3 -m security_portal.server --config /etc/cerebro/config.json --bind 127.0.0.1 --port 8080` from `/opt/cerebro`), then stop it after testing. Probe from an unauthenticated client to obtain **401/403**, from an authorized client to obtain the UI/JSON, and from an authenticated unauthorized client to obtain denial. A caller-supplied `X-Authenticated-User` header is **not** an identity control. Do not put this service on an externally reachable port. Probe CSRF/method behavior and logging without leaking snapshot contents.
+4. Only after those checks: `sudo python3 scripts/install.py --config /path/to/reviewed.json --apply --activate --gate-verified --proxy-check-url https://cerebro.example.com/`. The installer additionally probes that an unauthenticated GET returns 401/403 without redirect. The flag is an operator attestation of the separate authorized/unauthorized checks, not a substitute for them. Check `systemctl status cerebro`, `/healthz`, `/api/v1/overview` through the authenticated proxy. Stop/disable immediately if the proxy gate is misconfigured.
+
+## Operations
+
+- Upgrade: preserve a known-good repository/package archive and a copy of your config; run tests, dry-run new candidate, apply without activation, re-check the proxy gate before reactivation. The installer stores one previous-file receipt at `/var/lib/cerebro-installer/previous.json` (mode 0600). Each modifying apply replaces that single rollback point; export off-host backup first. A no-change apply leaves the receipt untouched.
+- Rollback: `sudo python3 scripts/install.py --rollback --dry-run` then `sudo python3 scripts/install.py --rollback --apply`; live rollback disables the service and restores previous files (including recorded mode and ownership for new-format receipts) or removes newly installed ones. Receipts from older releases contain bytes only and cannot restore prior file metadata, so retain an off-host backup when upgrading from them. Verify unit state and config afterward. Rollback receipt is not an off-host backup and does not restore external snapshots or proxy/IdP policy.
+- Rebuild: provision a clean Debian 13 host, restore only reviewed configuration and sanitized snapshots from protected backups, rerun installer dry-run/apply, recreate proxy identity gate independently, re-test denial and authorized access, then activate. Do not copy credentials or private producer scripts into this repo.
+- Failure: absent/bad snapshot becomes `unavailable`; fresh/old snapshots distinguish `healthy`/`stale`; an HTTP 401/403 becomes `unauthorized`; redirects are refused. `/healthz` only confirms process response, not feed health. Review `journalctl -u cerebro` and API connector state; do not treat `/readyz` as feed acceptance.
+
+## Accepted versus excluded
+
+See [docs/capability-boundary.md](docs/capability-boundary.md). Repository simulation does not establish production proxy acceptance, Debian live install, or parity with the private portal.
