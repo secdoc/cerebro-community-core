@@ -255,6 +255,31 @@ class InstallerTests(unittest.TestCase):
             self.assertFalse((dest/'opt/cerebro/__init__.py').exists())
             self.assertEqual(self.run_install('--root', str(dest), '--config', config, '--apply').returncode, 0)
 
+    def test_fresh_install_directories_support_unprivileged_service(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / 'root'
+            result = self.run_install('--root', str(dest), '--config',
+                                      str(ROOT / 'examples/config.json'), '--apply')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            for name in ('opt', 'opt/cerebro', 'opt/cerebro/security_portal',
+                         'opt/cerebro/security_portal/static'):
+                self.assertEqual((dest / name).stat().st_mode & 0o005, 0o005, name)
+            self.assertEqual((dest / 'etc/cerebro').stat().st_mode & 0o050, 0o050)
+            self.assertEqual((dest / 'etc/cerebro/config.json').stat().st_mode & 0o040, 0o040)
+
+    def test_existing_inaccessible_service_directory_refused_before_code_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / 'root'
+            (dest / 'etc/cerebro').mkdir(parents=True)
+            (dest / 'etc').chmod(0o755)
+            (dest / 'etc/cerebro').chmod(0o700)
+            result = self.run_install('--root', str(dest), '--config',
+                                      str(ROOT / 'examples/config.json'), '--apply')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('existing service directory requires reviewed permissions', result.stderr)
+            self.assertFalse((dest / 'opt').exists())
+            self.assertFalse((dest / 'etc/cerebro/config.json').exists())
+
     def test_installed_module_serves_api_from_isolated_root(self):
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp)/'root'
@@ -300,6 +325,8 @@ finally:
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp)/'root'; target = dest/'etc/cerebro/config.json'
             target.parent.mkdir(parents=True)
+            (dest/'etc').chmod(0o755)
+            target.parent.chmod(0o750)
             target.write_text('prior configuration')
             target.chmod(0o600)
             original = target.stat()

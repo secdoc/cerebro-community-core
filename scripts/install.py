@@ -91,6 +91,41 @@ def safe_receipt(root, state):
         raise ValueError('unsafe rollback receipt ownership or permissions')
 
 
+def ensure_service_directories(root):
+    """Create service paths with usable modes despite the installer's 0077 umask.
+
+    Do not loosen pre-existing directories: an operator must review their ownership
+    and permissions instead of allowing a package install to rewrite them.
+    """
+    service_gid = grp.getgrnam('cerebro').gr_gid if root == Path('/') else os.getgid()
+    directories = (('opt', 0o755, None), ('opt/cerebro', 0o755, None),
+                   ('opt/cerebro/security_portal', 0o755, None),
+                   ('opt/cerebro/security_portal/static', 0o755, None),
+                   ('etc', 0o755, None), ('etc/cerebro', 0o750, service_gid),
+                   ('etc/systemd', 0o755, None),
+                   ('etc/systemd/system', 0o755, None))
+    for name, mode, group in directories:
+        path = root / name
+        safe_target(root, Path(name) / '.cerebro-directory-check')
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            continue
+        expected_uid = 0 if root == Path('/') else os.geteuid()
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != expected_uid
+                or info.st_mode & mode != mode or info.st_mode & 0o022
+                or (group is not None and info.st_gid != group)):
+            raise ValueError('existing service directory requires reviewed permissions: ' + name)
+    for name, mode, group in directories:
+        path = root / name
+        if path.exists():
+            continue
+        path.mkdir(mode=mode)
+        os.chmod(path, mode)
+        if group is not None:
+            os.chown(path, 0 if root == Path('/') else os.geteuid(), group)
+
+
 def gate_check(url):
     from urllib.parse import urlsplit
     parsed = urlsplit(url)
@@ -236,6 +271,7 @@ def main():
             receipt[name] = None
     if changes:
         save_receipt(state, {'_format': 1, 'status': 'pending', 'targets': receipt})
+    ensure_service_directories(dest)
     for name,data in changes.items():
         target=dest/name; target.parent.mkdir(parents=True,exist_ok=True)
         safe_target(dest, Path(name))
