@@ -92,7 +92,7 @@ def safe_receipt(root, state):
         raise ValueError('unsafe rollback receipt ownership or permissions')
 
 
-def ensure_service_directories(root):
+def ensure_service_directories(root, create=True):
     """Create service paths with usable modes despite the installer's 0077 umask.
 
     Do not loosen pre-existing directories: an operator must review their ownership
@@ -117,6 +117,8 @@ def ensure_service_directories(root):
                 or info.st_mode & mode != mode or info.st_mode & 0o022
                 or (group is not None and info.st_gid != group)):
             raise ValueError('existing service directory requires reviewed permissions: ' + name)
+    if not create:
+        return
     for name, mode, group in directories:
         path = root / name
         if path.exists():
@@ -165,6 +167,12 @@ def finish_rollback(state, dest):
     if dest == Path('/'):
         subprocess.run(['systemctl', 'daemon-reload'], check=True)
     state.unlink()
+
+def finish_apply(state, receipt, dest):
+    """A failed reload must leave a pending receipt and block a later apply."""
+    if dest == Path('/'):
+        subprocess.run(['systemctl', 'daemon-reload'], check=True)
+    save_receipt(state, {'_format': 1, 'status': 'complete', 'targets': receipt})
 
 def installer_lock(root):
     """Serialize all mutating installer transactions, including rollback."""
@@ -297,6 +305,9 @@ def run_transaction(args, parser):
         try: pwd.getpwnam('cerebro')
         except KeyError:
             subprocess.run(['useradd','--system','--user-group','--home','/nonexistent','--shell','/usr/sbin/nologin','cerebro'],check=True)
+    # Validate existing directory metadata before replacing a recovery point.
+    ensure_service_directories(dest, create=False)
+    if dest == Path('/'):
         subprocess.run(['systemctl','disable','--now','cerebro.service'],check=False)
     receipt={}
     for name in changes:
@@ -324,9 +335,10 @@ def run_transaction(args, parser):
             if os.path.exists(tmp): os.unlink(tmp)
 
     if changes:
-        save_receipt(state, {'_format': 1, 'status': 'complete', 'targets': receipt})
+        finish_apply(state, receipt, dest)
     if dest == Path('/'):
-        subprocess.run(['systemctl','daemon-reload'],check=True)
+        if not changes:
+            subprocess.run(['systemctl','daemon-reload'],check=True)
         if args.activate:
             subprocess.run(['systemctl','enable','--now','cerebro.service'],check=True)
             subprocess.run(['systemctl','is-active','--quiet','cerebro.service'],check=True)

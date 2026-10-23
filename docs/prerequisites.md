@@ -22,6 +22,10 @@ The current edition supports credential-free HTTPS GET using the host's standard
 4. Verify TLS chain and hostname, denied anonymous and unauthorized users, authorized user access, logout/session expiry and proxy logging. Check that direct TCP 8080 is not reachable from other hosts.
 5. Activate with the installer gate and read back unit enabled/active state. Preserve the previous release and an off-host backup of adopter config, proxy policy and producers.
 
+## Existing installation directory migration
+
+Before a modifying upgrade, inspect `/etc/cerebro` with `stat -c '%U:%G %a %n' /etc/cerebro`. A legacy root:root 0755 directory is incompatible with the package's root:cerebro 0750 contract. Preserve the current directory metadata, config and `/var/lib/cerebro-installer/previous.json` off-host; in a reviewed maintenance window, stop the service and check other readers, then run `sudo chown root:cerebro /etc/cerebro && sudo chmod 0750 /etc/cerebro`. Read back its metadata and validate that the service user can read a reviewed root:cerebro 0640 config. Retry dry-run and apply only after this explicit migration. If reverting, restore the exact recorded directory metadata after checking for dependencies introduced by a newer release. The installer will not auto-migrate or restore directory metadata, and an incompatible pre-existing directory fails before replacing the previous receipt. This check does not prove that a live systemd reload or proxy activation will succeed.
+
 ## Recovery limits
 
 The installer receipt is a single-step local rollback, not a transactional deployment journal or backup. A failed mid-write install can leave a partial tree and a `pending` receipt. Another apply refuses to replace that receipt. Use `--rollback --apply` and inspect files and service state before retrying. Keep an independent protected backup, since this receipt covers only the immediately preceding modifying apply. Rollback does not undo producer, IdP, proxy or network changes. A fresh-host restore must reestablish those dependencies and repeat the authorization and browser checks.

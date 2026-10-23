@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from security_portal.config import ConfigError, load_config
 from security_portal.connectors import collect_integration
-from scripts.install import finish_rollback, gate_check
+from scripts.install import finish_apply, finish_rollback, gate_check
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -103,6 +103,18 @@ class ContractTests(unittest.TestCase):
 
 
 class InstallerTests(unittest.TestCase):
+    def test_apply_reload_failure_retains_pending_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / 'previous.json'
+            pending = {'_format': 1, 'status': 'pending', 'targets': {'etc/cerebro/config.json': None}}
+            state.write_text(json.dumps(pending))
+            failure = subprocess.CalledProcessError(1, ['systemctl', 'daemon-reload'])
+            with patch('scripts.install.subprocess.run', side_effect=failure) as reload:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    finish_apply(state, pending['targets'], Path('/'))
+            reload.assert_called_once_with(['systemctl', 'daemon-reload'], check=True)
+            self.assertEqual(json.loads(state.read_text()), pending)
+
     def test_rollback_receipt_survives_daemon_reload_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
             receipt = Path(tmp) / 'previous.json'
@@ -335,6 +347,29 @@ class InstallerTests(unittest.TestCase):
             self.assertIn('existing service directory requires reviewed permissions', result.stderr)
             self.assertFalse((dest / 'opt').exists())
             self.assertFalse((dest / 'etc/cerebro/config.json').exists())
+
+    def test_incompatible_upgrade_directory_preserves_previous_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / 'root'
+            config = ROOT / 'examples/config.json'
+            first = self.run_install('--root', str(dest), '--config', str(config), '--apply')
+            self.assertEqual(first.returncode, 0, first.stderr)
+            receipt = dest / 'var/lib/cerebro-installer/previous.json'
+            before_receipt = receipt.read_bytes()
+            target = dest / 'etc/cerebro/config.json'
+            before_target = target.read_bytes()
+            incompatible = dest / 'etc/cerebro'
+            incompatible.chmod(0o700)
+            modified = Path(tmp) / 'changed.json'
+            payload = json.loads(config.read_text())
+            payload['portal']['title'] = 'Next release'
+            modified.write_text(json.dumps(payload))
+            failed = self.run_install('--root', str(dest), '--config', str(modified), '--apply')
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn('existing service directory requires reviewed permissions', failed.stderr)
+            self.assertEqual(target.read_bytes(), before_target)
+            self.assertEqual(receipt.read_bytes(), before_receipt)
+            self.assertEqual(incompatible.stat().st_mode & 0o777, 0o700)
 
     def test_installed_module_serves_api_from_isolated_root(self):
         with tempfile.TemporaryDirectory() as tmp:
