@@ -32,6 +32,14 @@ class ContractTests(unittest.TestCase):
         spec = self.base(); spec['url'] = 'https://other.example.com/status'
         with self.assertRaises(ConfigError): self.config(spec)
 
+    def test_allowed_origins_rejects_paths_and_parameters(self):
+        for origin in ('https://feed.example.com/status', 'https://feed.example.com/;scope=admin'):
+            spec = self.base(); spec['allowed_origins'] = [origin]
+            with self.subTest(origin=origin), self.assertRaisesRegex(ConfigError, 'exact HTTPS origin'):
+                self.config(spec)
+        spec = self.base(); spec['allowed_origins'] = ['https://feed.example.com/']
+        self.assertEqual(self.config(spec)['integrations'][0]['allowed_origins'], spec['allowed_origins'])
+
     def test_rejects_arbitrary_header_and_unbounded_analytics(self):
         spec = self.base(); spec['header_env'] = {'Host': 'TOKEN'}
         with self.assertRaises(ConfigError): self.config(spec)

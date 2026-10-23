@@ -146,6 +146,9 @@ def load_config(path: Path) -> dict:
                 if not isinstance(allowed, str):
                     raise ConfigError(f"integration {integration_id} has invalid allowed_origins")
                 _web_url(allowed, "allowed_origins")
+                parsed_origin = urlparse(allowed)
+                if parsed_origin.path not in ('', '/') or parsed_origin.params:
+                    raise ConfigError(f"integration {integration_id} requires an exact HTTPS origin")
             if _origin(spec["url"]) not in {_origin(value) for value in allowed_origins}:
                 raise ConfigError(f"integration {integration_id} URL is outside allowed_origins")
         if connector == "static" and spec.get("state", "unknown") not in _ALLOWED_STATES:
