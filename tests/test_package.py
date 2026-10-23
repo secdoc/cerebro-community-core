@@ -17,6 +17,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ContractTests(unittest.TestCase):
+    def test_github_dry_run_uses_absent_isolated_root(self):
+        workflow = (ROOT / '.github/workflows/verify.yml').read_text()
+        self.assertIn('python3 scripts/install.py --root "$RUNNER_TEMP/cerebro-dry-run-root" --config examples/config.json --dry-run', workflow)
+
     def test_ui_declares_self_contained_favicon(self):
         from html.parser import HTMLParser
         from security_portal.server import PortalHandler
