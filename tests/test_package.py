@@ -304,6 +304,7 @@ finally:
                                                        'gid': os.getgid()},
             }
             state.write_text(json.dumps(receipt))
+            state.chmod(0o600)
             result = self.run_install('--root', str(root), '--rollback', '--apply')
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(config.read_text(), 'current config')
@@ -326,6 +327,7 @@ finally:
                 'etc/systemd/system/cerebro.service': {'content': 'previous unit'.encode().hex(),
                                                        'mode': 0o644, 'uid': 2**64, 'gid': os.getgid()},
             }))
+            state.chmod(0o600)
             result = self.run_install('--root', str(root), '--rollback', '--apply')
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('invalid rollback metadata', result.stderr)
@@ -341,6 +343,7 @@ finally:
             state.parent.mkdir(parents=True)
             state.write_text(json.dumps({'etc/cerebro/config.json': {
                 'content': None, 'mode': 0o600, 'uid': os.getuid(), 'gid': os.getgid()}}))
+            state.chmod(0o600)
             result = self.run_install('--root', str(root), '--rollback', '--apply')
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('invalid rollback content', result.stderr)
@@ -384,6 +387,26 @@ finally:
             root=Path(tmp)/'root'; state=root/'var/lib/cerebro-installer/previous.json'
             state.parent.mkdir(parents=True)
             state.write_text(json.dumps({'../outside':'00'}))
+            state.chmod(0o600)
             result=self.run_install('--root',str(root),'--rollback','--apply')
             self.assertNotEqual(result.returncode,0)
             self.assertTrue(state.exists())
+
+    def test_rollback_refuses_writable_receipt_without_mutation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)/'root'
+            target = root/'etc/cerebro/config.json'
+            state = root/'var/lib/cerebro-installer/previous.json'
+            target.parent.mkdir(parents=True)
+            state.parent.mkdir(parents=True)
+            target.write_text('current config')
+            state.write_text(json.dumps({'etc/cerebro/config.json': '7072696f72'}))
+            state.chmod(0o666)
+            try:
+                result = self.run_install('--root', str(root), '--rollback', '--apply')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('unsafe rollback receipt', result.stderr)
+                self.assertEqual(target.read_text(), 'current config')
+                self.assertTrue(state.exists())
+            finally:
+                state.chmod(0o600)

@@ -79,6 +79,17 @@ def safe_target(root, name):
             raise ValueError('unsafe installation target')
     return target
 
+def safe_receipt(root, state):
+    """A rollback recipe must not be editable by an untrusted local user."""
+    safe_target(root, Path('var/lib/cerebro-installer/previous.json'))
+    try:
+        info = state.lstat()
+    except FileNotFoundError:
+        return
+    trusted_uid = 0 if root == Path('/') else os.geteuid()
+    if info.st_uid != trusted_uid or info.st_mode & 0o077:
+        raise ValueError('unsafe rollback receipt ownership or permissions')
+
 
 def gate_check(url):
     from urllib.parse import urlsplit
@@ -138,7 +149,7 @@ def main():
     if args.apply:
         os.umask(0o077)
     state=dest/'var/lib/cerebro-installer/previous.json'
-    safe_target(dest, Path('var/lib/cerebro-installer/previous.json'))
+    safe_receipt(dest, state)
     if args.rollback:
         if not state.is_file(): parser.error('no rollback receipt')
         receipt=json.loads(state.read_text())
