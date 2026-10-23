@@ -359,6 +359,7 @@ class InstallerTests(unittest.TestCase):
     def test_existing_inaccessible_service_directory_refused_before_code_write(self):
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp) / 'root'
+            dest.mkdir(mode=0o700)
             (dest / 'etc/cerebro').mkdir(parents=True)
             (dest / 'etc').chmod(0o755)
             (dest / 'etc/cerebro').chmod(0o700)
