@@ -160,6 +160,12 @@ def save_receipt(state, payload):
     finally:
         if os.path.exists(tmp): os.unlink(tmp)
 
+def finish_rollback(state, dest):
+    """Retain the recovery receipt until systemd has accepted restored unit files."""
+    if dest == Path('/'):
+        subprocess.run(['systemctl', 'daemon-reload'], check=True)
+    state.unlink()
+
 def installer_lock(root):
     """Serialize all mutating installer transactions, including rollback."""
     name = Path('run/cerebro-installer.lock') if root == Path('/') else Path('.cerebro-installer.lock')
@@ -266,8 +272,7 @@ def run_transaction(args, parser):
                     os.replace(tmp, target)
                 finally:
                     if os.path.exists(tmp): os.unlink(tmp)
-        state.unlink()
-        if dest == Path('/'): subprocess.run(['systemctl','daemon-reload'],check=True)
+        finish_rollback(state, dest)
         print('rollback=complete')
         return
     if args.config is None:

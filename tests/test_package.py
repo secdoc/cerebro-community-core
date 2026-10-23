@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from security_portal.config import ConfigError, load_config
 from security_portal.connectors import collect_integration
-from scripts.install import gate_check
+from scripts.install import finish_rollback, gate_check
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -103,6 +103,21 @@ class ContractTests(unittest.TestCase):
 
 
 class InstallerTests(unittest.TestCase):
+    def test_rollback_receipt_survives_daemon_reload_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            receipt = Path(tmp) / 'previous.json'
+            receipt.write_text('recovery-point')
+            failure = subprocess.CalledProcessError(1, ['systemctl', 'daemon-reload'])
+            with patch('scripts.install.subprocess.run', side_effect=failure) as reload:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    finish_rollback(receipt, Path('/'))
+            reload.assert_called_once_with(['systemctl', 'daemon-reload'], check=True)
+            self.assertEqual(receipt.read_text(), 'recovery-point')
+            with patch('scripts.install.subprocess.run') as reload:
+                finish_rollback(receipt, Path('/'))
+            reload.assert_called_once_with(['systemctl', 'daemon-reload'], check=True)
+            self.assertFalse(receipt.exists())
+
     def test_apply_waits_for_exclusive_installer_lock(self):
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp) / 'root'
