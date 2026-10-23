@@ -192,6 +192,47 @@ class InstallerTests(unittest.TestCase):
             self.assertNotEqual(self.run_install('--root', str(dest), '--config', str(invalid), '--apply').returncode, 0)
             self.assertEqual((dest/'etc/cerebro/config.json').read_bytes(), original)
 
+    def test_installed_module_serves_api_from_isolated_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp)/'root'
+            config = str(ROOT/'examples/config.json')
+            first = self.run_install('--root', str(dest), '--config', config, '--apply')
+            self.assertEqual(first.returncode, 0, first.stderr)
+            second = self.run_install('--root', str(dest), '--config', config, '--apply')
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertIn('changed=0', second.stdout)
+            installed = dest/'opt/cerebro'
+            script = '''import json, os, sys, threading, urllib.request
+from pathlib import Path
+from security_portal.config import load_config
+from security_portal.server import PortalServer
+import security_portal
+assert Path(security_portal.__file__).resolve().is_relative_to(Path(os.environ['PYTHONPATH']))
+config = load_config(Path(sys.argv[1]))
+server = PortalServer(('127.0.0.1', 0), config=config,
+                      static_root=Path(security_portal.__file__).parent/'static')
+thread = threading.Thread(target=server.serve_forever, daemon=True)
+thread.start()
+try:
+    base = 'http://127.0.0.1:' + str(server.server_port)
+    with urllib.request.urlopen(base+'/api/v1/overview', timeout=5) as response:
+        payload = json.load(response)
+        assert payload['schema_version'] == 'cerebro.integration.v1'
+        assert payload['overview']['integration_count'] == 2
+        assert payload['integrations'][0]['state'] == 'unavailable'
+    with urllib.request.urlopen(base+'/', timeout=5) as response:
+        assert b'Cerebro' in response.read()
+finally:
+    server.shutdown()
+    server.server_close()
+    thread.join(timeout=5)
+'''
+            result = subprocess.run([sys.executable, '-c', script,
+                                     str(dest/'etc/cerebro/config.json')], cwd=tmp,
+                                    env={**os.environ, 'PYTHONPATH': str(installed)},
+                                    capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_rollback_restores_existing_config_mode_and_owner(self):
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp)/'root'; target = dest/'etc/cerebro/config.json'
