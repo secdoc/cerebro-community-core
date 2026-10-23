@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Conservative Debian 13 single-node package installer; offline root simulation supported."""
 import argparse
+import fcntl
 import json
 import os
 import grp
@@ -159,6 +160,29 @@ def save_receipt(state, payload):
     finally:
         if os.path.exists(tmp): os.unlink(tmp)
 
+def installer_lock(root):
+    """Serialize all mutating installer transactions, including rollback."""
+    name = Path('run/cerebro-installer.lock') if root == Path('/') else Path('.cerebro-installer.lock')
+    if root != Path('/') and not root.exists():
+        root.mkdir(mode=0o700)
+    target = safe_target(root, name)
+    flags = os.O_CREAT | os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW
+    fd = os.open(target, flags, 0o600)
+    try:
+        info = os.fstat(fd)
+        expected_uid = 0 if root == Path('/') else os.geteuid()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != expected_uid or info.st_mode & 0o077:
+            raise ValueError('unsafe installer lock ownership, permissions or type')
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        # The lock name must still identify the descriptor after waiting.
+        current = target.lstat()
+        if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
+            raise ValueError('installer lock replaced while waiting')
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
 
 def main():
     parser=argparse.ArgumentParser(description='Cerebro Debian 13 installer; dry-run by default')
@@ -180,6 +204,15 @@ def main():
             parser.error('live installation is supported only on Debian 13')
         if 'ID=debian' not in Path('/etc/os-release').read_text(): parser.error('Debian required')
     if args.root != Path('/') and (not args.root.is_absolute() or args.root.is_symlink()): parser.error('simulation root must be absolute and not a symlink')
+    if args.apply:
+        lock_fd = installer_lock(args.root)
+        try:
+            return run_transaction(args, parser)
+        finally:
+            os.close(lock_fd)
+    return run_transaction(args, parser)
+
+def run_transaction(args, parser):
     dest=args.root
     if args.apply:
         os.umask(0o077)

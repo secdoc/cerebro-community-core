@@ -1,8 +1,10 @@
 import json
+import fcntl
 import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -101,6 +103,45 @@ class ContractTests(unittest.TestCase):
 
 
 class InstallerTests(unittest.TestCase):
+    def test_apply_waits_for_exclusive_installer_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / 'root'
+            dest.mkdir(mode=0o700)
+            lock = dest / '.cerebro-installer.lock'
+            fd = os.open(lock, os.O_CREAT | os.O_RDWR, 0o600)
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            proc = subprocess.Popen([sys.executable, str(ROOT / 'scripts/install.py'),
+                                     '--root', str(dest), '--config',
+                                     str(ROOT / 'examples/config.json'), '--apply'],
+                                    cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    text=True)
+            try:
+                time.sleep(0.3)
+                self.assertIsNone(proc.poll(), 'installer did not wait for the held lock')
+                self.assertFalse((dest / 'var/lib/cerebro-installer/previous.json').exists())
+                self.assertFalse((dest / 'opt/cerebro/security_portal/server.py').exists())
+            finally:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+                os.close(fd)
+            stdout, stderr = proc.communicate(timeout=15)
+            self.assertEqual(proc.returncode, 0, stderr)
+            self.assertIn('installed=complete', stdout)
+            self.assertEqual(json.loads((dest / 'var/lib/cerebro-installer/previous.json').read_text())['status'], 'complete')
+            self.assertTrue((dest / 'opt/cerebro/security_portal/server.py').exists())
+
+    def test_installer_refuses_symlink_lock_without_target_mutation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / 'root'
+            dest.mkdir()
+            outside = Path(tmp) / 'outside'
+            outside.write_text('untouched')
+            (dest / '.cerebro-installer.lock').symlink_to(outside)
+            result = self.run_install('--root', str(dest), '--config',
+                                      str(ROOT / 'examples/config.json'), '--apply')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(outside.read_text(), 'untouched')
+            self.assertFalse((dest / 'var').exists())
+
     def test_activation_gate_refuses_query_and_fragment_without_network(self):
         for suffix in ('?access_token=sentinel', '#access_token=sentinel'):
             with self.subTest(suffix=suffix), patch('scripts.install.urllib.request.build_opener') as opener:
