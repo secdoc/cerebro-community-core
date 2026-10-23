@@ -85,6 +85,23 @@ def gate_check(url):
         raise ValueError('unauthenticated proxy probe must return 401 or 403') from exc
     raise ValueError('unauthenticated proxy probe did not deny access')
 
+def save_receipt(state, payload):
+    """Commit a durable receipt before target mutation or phase transition."""
+    state.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=state.parent, prefix='.cerebro-receipt-')
+    try:
+        with os.fdopen(fd, 'w') as stream:
+            json.dump(payload, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, state)
+        directory = os.open(state.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try: os.fsync(directory)
+        finally: os.close(directory)
+    finally:
+        if os.path.exists(tmp): os.unlink(tmp)
+
 
 def main():
     parser=argparse.ArgumentParser(description='Cerebro Debian 13 installer; dry-run by default')
@@ -112,6 +129,10 @@ def main():
     if args.rollback:
         if not state.is_file(): parser.error('no rollback receipt')
         receipt=json.loads(state.read_text())
+        if isinstance(receipt, dict) and receipt.get('_format') == 1:
+            if receipt.get('status') not in ('pending', 'complete'):
+                raise ValueError('invalid rollback receipt phase')
+            receipt = receipt.get('targets')
         if not isinstance(receipt, dict) or not set(receipt).issubset({str(n) for n in unit_files({'portal': {}, 'integrations': []})}):
             raise ValueError('rollback receipt contains unexpected targets')
         for name, previous in receipt.items():
@@ -168,6 +189,12 @@ def main():
     for name in sorted(changes): print('  '+name)
     if not args.apply: return
     if args.activate: gate_check(args.proxy_check_url)
+    if state.exists():
+        existing = json.loads(state.read_text())
+        if isinstance(existing, dict) and existing.get('_format') == 1 and existing.get('status') == 'pending':
+            raise ValueError('interrupted installation: run --rollback --apply before retrying')
+        if isinstance(existing, dict) and existing.get('_format') == 1 and existing.get('status') != 'complete':
+            raise ValueError('invalid existing receipt phase')
     if dest == Path('/'):
         try: pwd.getpwnam('cerebro')
         except KeyError:
@@ -183,17 +210,7 @@ def main():
         else:
             receipt[name] = None
     if changes:
-        state.parent.mkdir(parents=True,exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=state.parent, prefix='.cerebro-receipt-')
-        try:
-            with os.fdopen(fd, 'w') as stream:
-                json.dump(receipt, stream)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.chmod(tmp, 0o600)
-            os.replace(tmp, state)
-        finally:
-            if os.path.exists(tmp): os.unlink(tmp)
+        save_receipt(state, {'_format': 1, 'status': 'pending', 'targets': receipt})
     for name,data in changes.items():
         target=dest/name; target.parent.mkdir(parents=True,exist_ok=True)
         fd,tmp=tempfile.mkstemp(dir=target.parent, prefix='.cerebro-')
@@ -206,6 +223,8 @@ def main():
         finally:
             if os.path.exists(tmp): os.unlink(tmp)
 
+    if changes:
+        save_receipt(state, {'_format': 1, 'status': 'complete', 'targets': receipt})
     if dest == Path('/'):
         subprocess.run(['systemctl','daemon-reload'],check=True)
         if args.activate:

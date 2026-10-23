@@ -24,4 +24,4 @@ The current edition supports credential-free HTTPS GET using the host's standard
 
 ## Recovery limits
 
-The installer receipt is a single-step local rollback, not a transactional deployment journal or backup. A failed mid-write install can leave a partial tree; use `--rollback --apply` and inspect files and service state before retrying. Rollback does not undo producer, IdP, proxy or network changes. A fresh-host restore must reestablish those dependencies and repeat the authorization and browser checks.
+The installer receipt is a single-step local rollback, not a transactional deployment journal or backup. A failed mid-write install can leave a partial tree and a `pending` receipt. Another apply refuses to replace that receipt. Use `--rollback --apply` and inspect files and service state before retrying. Keep an independent protected backup, since this receipt covers only the immediately preceding modifying apply. Rollback does not undo producer, IdP, proxy or network changes. A fresh-host restore must reestablish those dependencies and repeat the authorization and browser checks.

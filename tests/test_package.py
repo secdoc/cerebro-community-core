@@ -192,6 +192,34 @@ class InstallerTests(unittest.TestCase):
             self.assertNotEqual(self.run_install('--root', str(dest), '--config', str(invalid), '--apply').returncode, 0)
             self.assertEqual((dest/'etc/cerebro/config.json').read_bytes(), original)
 
+    def test_interrupted_apply_preserves_receipt_until_rollback(self):
+        from scripts import install
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp)/'root'
+            config = str(ROOT/'examples/config.json')
+            original_replace = install.os.replace
+            written = []
+            def fail_second_target(source, target):
+                if Path(target).is_relative_to(dest/'opt/cerebro') or Path(target) == dest/'etc/cerebro/config.json':
+                    written.append(str(target))
+                    if len(written) == 2:
+                        raise OSError('simulated interrupted write')
+                return original_replace(source, target)
+            with patch.object(sys, 'argv', ['install.py', '--root', str(dest), '--config', config, '--apply']), \
+                 patch.object(install.os, 'replace', side_effect=fail_second_target):
+                with self.assertRaisesRegex(OSError, 'simulated interrupted write'):
+                    install.main()
+            receipt = dest/'var/lib/cerebro-installer/previous.json'
+            self.assertEqual(json.loads(receipt.read_text())['status'], 'pending')
+            retry = self.run_install('--root', str(dest), '--config', config, '--apply')
+            self.assertNotEqual(retry.returncode, 0)
+            self.assertIn('interrupted installation', retry.stderr)
+            rolled = self.run_install('--root', str(dest), '--rollback', '--apply')
+            self.assertEqual(rolled.returncode, 0, rolled.stderr)
+            self.assertFalse(receipt.exists())
+            self.assertFalse((dest/'opt/cerebro/__init__.py').exists())
+            self.assertEqual(self.run_install('--root', str(dest), '--config', config, '--apply').returncode, 0)
+
     def test_installed_module_serves_api_from_isolated_root(self):
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp)/'root'
