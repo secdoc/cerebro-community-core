@@ -17,6 +17,27 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ContractTests(unittest.TestCase):
+    def test_ui_declares_self_contained_favicon(self):
+        from html.parser import HTMLParser
+        from security_portal.server import PortalHandler
+
+        class IconLinks(HTMLParser):
+            icons = []
+
+            def handle_starttag(self, tag, attrs):
+                if tag == 'link' and dict(attrs).get('rel') == 'icon':
+                    self.icons.append(dict(attrs).get('href'))
+
+        parser = IconLinks()
+        parser.feed((ROOT / 'security_portal/static/index.html').read_text())
+        self.assertEqual(len(parser.icons), 1)
+        self.assertTrue(parser.icons[0].startswith('data:image/svg+xml,'))
+        from urllib.parse import unquote
+        from xml.etree import ElementTree
+        icon = ElementTree.fromstring(unquote(parser.icons[0].partition(',')[2]))
+        self.assertEqual(icon.tag, '{http://www.w3.org/2000/svg}svg')
+        self.assertTrue(any("img-src 'self' data:" in value for value in PortalHandler.end_headers.__code__.co_consts if isinstance(value, str)))
+
     def config(self, integration):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'config.json'

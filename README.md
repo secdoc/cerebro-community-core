@@ -6,7 +6,7 @@ This is an installable, deliberately bounded read-only Cerebro portal for adopte
 
 - Debian 13 single-instance installer, dry-run by default; interactive config-path prompt on a TTY. Explicit `--apply` stages code, JSON config, and a disabled systemd unit. Simulation uses `--root` and never manages systemd.
 - Local JSON object snapshots, credential-free verified-HTTPS JSON GET endpoints, and explicit static planned catalog entries; exact origin allowlist for HTTPS; no redirects; bounded responses and explicit scalar summary mappings.
-- Versioned `/api/v1/overview` and `/api/v1/integrations`, `/healthz`, `/readyz`, and a simple self-hosted responsive UI. Snapshot state/freshness, summaries, provenance and connector health; entity/relationship arrays intentionally empty.
+- Versioned `/api/v1/overview` and `/api/v1/integrations`, `/healthz`, `/readyz`, and a simple self-hosted responsive UI with a self-contained SVG favicon (no external favicon request). Snapshot state/freshness, summaries, provenance and connector health; entity/relationship arrays intentionally empty.
 - Loopback-only server and disabled-by-default activation behind an adopter-supplied authenticated TLS proxy. No proxy or IdP configured by this package.
 
 ## Prerequisites
