@@ -72,6 +72,33 @@ class ContractTests(unittest.TestCase):
             spec['path'] = str(root/'secret')
             self.assertNotIn('count', collect_integration(spec)['summary'])
 
+    def test_snapshot_read_is_descriptor_bound_and_size_limited(self):
+        from security_portal import connectors
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            snapshot = root/'snapshot.json'
+            secret = root/'secret.json'
+            snapshot.write_text('{"count":1}')
+            secret.write_text('{"count":98765}')
+            spec = {'id':'feed','name':'Feed','category':'SOC','connector':'json_file',
+                    'path':str(snapshot),'max_age_seconds':60,'summary_paths':{'count':'count'}}
+            self.assertEqual(collect_integration(spec)['summary']['count'], 1)
+            fifo = root/'pipe'
+            os.mkfifo(fifo)
+            spec['path'] = str(fifo)
+            self.assertEqual(collect_integration(spec)['state'], 'unavailable')
+            spec['path'] = str(snapshot)
+            original_open = connectors.os.open
+            def swap_before_open(path, flags, *args, **kwargs):
+                snapshot.unlink()
+                snapshot.symlink_to(secret)
+                return original_open(path, flags, *args, **kwargs)
+            with patch.object(connectors.os, 'open', side_effect=swap_before_open):
+                self.assertEqual(collect_integration(spec)['state'], 'unavailable')
+            snapshot.unlink()
+            snapshot.write_text('{"count":1,"padding":"' + 'x' * (1024 * 1024) + '"}')
+            self.assertEqual(collect_integration(spec)['state'], 'unavailable')
+
 
 class InstallerTests(unittest.TestCase):
     def test_activation_gate_refuses_query_and_fragment_without_network(self):

@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 import math
 import os
+import stat
 import ssl
 import urllib.error
 import urllib.request
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from .model import classify_snapshot
@@ -161,10 +161,15 @@ def collect_integration(spec: dict, now: datetime | None = None) -> dict:
         return _result(normalized, document, now)
     if connector == "json_file":
         try:
-            path = Path(spec["path"])
-            if path.is_symlink() or path.stat().st_size > 1024 * 1024:
-                raise ValueError('snapshot path rejected')
-            document = json.loads(path.read_text(encoding="utf-8"))
+            fd = os.open(spec["path"], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+            with os.fdopen(fd, 'rb') as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_size > 1024 * 1024:
+                    raise ValueError('snapshot path rejected')
+                raw = stream.read(1024 * 1024 + 1)
+                if len(raw) > 1024 * 1024:
+                    raise ValueError('snapshot too large')
+            document = json.loads(raw)
             if not isinstance(document, dict):
                 raise ValueError("source is not an object")
             return _result(spec, document, now)
