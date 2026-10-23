@@ -58,15 +58,25 @@ def unit_files(config):
     return files
 
 def safe_target(root, name):
-    """Refuse symlinks and non-regular targets before a privileged file write."""
+    """Require trusted, non-writable ancestors for privileged target operations."""
     if name.is_absolute() or '..' in name.parts:
         raise ValueError('installation target escapes root')
     target = root / name
-    for ancestor in (root, *reversed(target.parents[:-1])):
-        if ancestor.is_symlink():
-            raise ValueError('symlink in installation path')
-    if target.is_symlink() or (target.exists() and not target.is_file()):
-        raise ValueError('unsafe installation target')
+    trusted_uid = 0 if root == Path('/') else os.geteuid()
+    for ancestor in (root, *(root.joinpath(*name.parts[:index]) for index in range(1, len(name.parts)))):
+        try:
+            info = ancestor.lstat()
+        except FileNotFoundError:
+            continue
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != trusted_uid or info.st_mode & 0o022:
+            raise ValueError('unsafe installation directory ownership, permissions or type')
+    try:
+        info = target.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError('unsafe installation target')
     return target
 
 
@@ -88,6 +98,7 @@ def gate_check(url):
 def save_receipt(state, payload):
     """Commit a durable receipt before target mutation or phase transition."""
     state.parent.mkdir(parents=True, exist_ok=True)
+    safe_target(state.parents[3], Path('var/lib/cerebro-installer/previous.json'))
     fd, tmp = tempfile.mkstemp(dir=state.parent, prefix='.cerebro-receipt-')
     try:
         with os.fdopen(fd, 'w') as stream:
@@ -124,6 +135,8 @@ def main():
         if 'ID=debian' not in Path('/etc/os-release').read_text(): parser.error('Debian required')
     if args.root != Path('/') and (not args.root.is_absolute() or args.root.is_symlink()): parser.error('simulation root must be absolute and not a symlink')
     dest=args.root
+    if args.apply:
+        os.umask(0o077)
     state=dest/'var/lib/cerebro-installer/previous.json'
     safe_target(dest, Path('var/lib/cerebro-installer/previous.json'))
     if args.rollback:
@@ -160,6 +173,7 @@ def main():
                 metadata = previous if isinstance(previous, dict) else None
                 content = cast(str, previous['content'] if metadata else previous)
                 target.parent.mkdir(parents=True,exist_ok=True)
+                safe_target(dest, Path(name))
                 fd, tmp = tempfile.mkstemp(dir=target.parent, prefix='.cerebro-rollback-')
                 try:
                     with os.fdopen(fd, 'wb') as stream:
@@ -213,6 +227,7 @@ def main():
         save_receipt(state, {'_format': 1, 'status': 'pending', 'targets': receipt})
     for name,data in changes.items():
         target=dest/name; target.parent.mkdir(parents=True,exist_ok=True)
+        safe_target(dest, Path(name))
         fd,tmp=tempfile.mkstemp(dir=target.parent, prefix='.cerebro-')
         try:
             with os.fdopen(fd,'wb') as stream: stream.write(data)

@@ -363,6 +363,22 @@ finally:
             self.assertFalse((outside/'cerebro').exists())
             self.assertFalse((root/'var').exists())
 
+    def test_install_refuses_writable_ancestor_before_receipt_or_target_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'root'
+            target_dir = root / 'etc'
+            target_dir.mkdir(parents=True)
+            target_dir.chmod(0o777)
+            try:
+                result = self.run_install('--root', str(root), '--config',
+                                          str(ROOT/'examples/config.json'), '--apply')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('unsafe installation directory', result.stderr)
+                self.assertFalse((root/'etc/cerebro').exists())
+                self.assertFalse((root/'var').exists())
+            finally:
+                target_dir.chmod(0o700)
+
     def test_rollback_rejects_unexpected_receipt_target(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)/'root'; state=root/'var/lib/cerebro-installer/previous.json'
