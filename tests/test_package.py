@@ -102,6 +102,15 @@ class InstallerTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, result.stderr)
             self.assertIn('private DNS', result.stdout)
 
+    def test_privacy_scanner_handles_malformed_ipv4_without_crashing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp)/'payload.txt').write_text('.'.join(['999'] * 4) + '\n')
+            result = subprocess.run([sys.executable, str(ROOT/'scripts/scrub.py'), tmp],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('invalid IPv4', result.stdout)
+            self.assertNotIn('Traceback', result.stderr)
+
     def test_wizard_generates_valid_adopter_config(self):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp)/'config.json'
@@ -115,6 +124,42 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(applied.returncode,0,applied.stderr)
             self.assertEqual(load_config(output)['integrations'][0]['summary_paths'],{'events':'count'})
             self.assertEqual(output.stat().st_mode & 0o777,0o600)
+
+    def test_wizard_records_adopter_dns_without_changing_host_dns(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)/'config.json'
+            resolver = '.'.join(('192', '0', '2', '53'))
+            command = [sys.executable, str(ROOT/'scripts/wizard.py'), '--output', str(output),
+                       '--dns-resolver', resolver, '--dns-resolver', '2001:db8::53',
+                       '--dns-search-domain', 'site.example', '--apply']
+            result = subprocess.run(command, input='Cerebro\n\n', capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            config = load_config(output)
+            self.assertEqual(config['deployment']['dns_resolvers'], [resolver, '2001:db8::53'])
+            self.assertEqual(config['deployment']['dns_search_domain'], 'site.example')
+            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+
+    def test_wizard_refuses_invalid_adopter_dns_without_writing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)/'config.json'
+            command = [sys.executable, str(ROOT/'scripts/wizard.py'), '--output', str(output),
+                       '--dns-resolver', 'not-an-ip', '--apply']
+            result = subprocess.run(command, input='Cerebro\n\n', capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(output.exists())
+
+    def test_config_refuses_invalid_adopter_dns_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'config.json'
+            resolver = '.'.join(('192', '0', '2', '53'))
+            for deployment in ({'dns_resolvers': ['not-an-ip']},
+                               {'dns_resolvers': [resolver, resolver]},
+                               {'dns_search_domain': 'bad_domain.example'},
+                               {'dns_resolvers': ['.'.join(('0', '0', '0', '0'))]}):
+                with self.subTest(deployment=deployment):
+                    path.write_text(json.dumps({'portal': {'title': 'Cerebro'},
+                                                'integrations': [], 'deployment': deployment}))
+                    with self.assertRaises(ConfigError): load_config(path)
 
     def run_install(self, *args):
         return subprocess.run([sys.executable, str(ROOT/'scripts/install.py'), *args], cwd=ROOT,

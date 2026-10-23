@@ -6,6 +6,7 @@
 - A network policy that makes port 8080 reachable **only on loopback**. Do not expose the Python server directly. Provide a separate TLS reverse proxy with a valid server certificate, user authentication, a documented authorization policy and audit logging. The installer does not install the proxy or configure an IdP.
 - A named operator to verify unauthenticated denial, authenticated unauthorized denial, and authenticated authorized access on the exact public route. A 401/403 unauthenticated probe is necessary but not sufficient. Keep the systemd unit disabled until these checks pass.
 - Source ownership, classification and allowed fields documented per feed. Grant the `cerebro` system user read access only to selected sanitized snapshot files. Do not expose raw events, credentials or arbitrary objects. The portal does not create producers or store their tokens.
+- If name resolution is required, configure the adopter's OS resolver and search domain through its normal managed network process. The wizard can record one to four resolver IPs and a search domain in `deployment` as reviewed prerequisites, but neither wizard nor installer applies host DNS. Verify resolution of feed and proxy names before activation; back up and roll back OS DNS through the adopter's own network tooling.
 
 ## Feed association worksheet
 

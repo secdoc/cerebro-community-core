@@ -6,6 +6,7 @@ This standalone package contains no private deployment history or environment-sp
 |---|---|---|
 | Portal core/API | Accepted, adapted from sanitized baseline | Read-only overview, integration listing, health/ready endpoints, self-hosted simplified UI. |
 | Feed mapping | Accepted, narrowed | Adopter-supplied JSON object snapshots or unauthenticated, verified HTTPS GET-only JSON endpoints; exact origin allowlist, no redirects, bounded response, scalar summary field allowlist. Static planned entries supported. |
+| DNS prerequisites | Accepted as metadata only | Wizard validates and records adopter resolver IPs and search domain. Host DNS configuration and verification are external; no network mutation. |
 | State and provenance | Accepted | Healthy/degraded/stale/unavailable/unauthorized/planned, freshness, source metadata, no entity emission. |
 | Native links | Accepted | Validated HTTPS only, user-provided, rel=noopener; links are navigation, not health evidence. |
 | Single-host installer | Tested in isolated root only | Python 3.13/systemd Debian 13 target; dry-run/apply/one-step rollback, disabled unit by default, explicit gated activation. No live host install performed. |

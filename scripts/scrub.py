@@ -25,7 +25,11 @@ def scan(root):
             for pattern,label in ((DNS,'private DNS'),(SECRET,'secret assignment'),(KEY,'private key'),(PATH,'operator path')):
                 if pattern.search(text): findings.append((str(path.relative_to(root)),label))
             for candidate in IP.findall(text):
-                address=ipaddress.ip_address(candidate)
+                try:
+                    address=ipaddress.IPv4Address(candidate)
+                except ipaddress.AddressValueError:
+                    findings.append((str(path.relative_to(root)), 'invalid IPv4'))
+                    continue
                 if address.is_private and not address.is_loopback and not any(address in net for net in (
                     ipaddress.ip_network('192.0.2.0/24'), ipaddress.ip_network('198.51.100.0/24'),
                     ipaddress.ip_network('203.0.113.0/24'))):

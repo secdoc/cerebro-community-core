@@ -19,6 +19,8 @@ The GitLab CI job requires a project CI variable `CI_RUNNER_TAG` set to an eligi
 
 Run `python3 scripts/wizard.py --output /path/outside/checkout/cerebro.json` to answer prompts and validate without saving. Repeat with `--apply` to write the reviewed mapping mode 0600. The wizard accepts each file path or exact HTTPS GET URL/origin and dotted scalar summary paths, never prompts for credentials, refuses overwriting and refuses saving inside the source checkout. Then pass the saved JSON to the installer. The installer itself also prompts for an existing config path when run on a TTY without `--config`.
 
+Optional adopter DNS prerequisites: pass `--dns-resolver 192.0.2.53 --dns-search-domain site.example` to the wizard (repeat the resolver argument for up to four addresses). This records validated `deployment.dns_resolvers` and `deployment.dns_search_domain` in the adopter-owned config. It **does not** change host DNS, systemd-resolved, routing, or firewall settings. Configure and verify DNS on the adopter host separately before enabling HTTPS feeds or the TLS proxy.
+
 ## Reproduce offline
 
 ```sh

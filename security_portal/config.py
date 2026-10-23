@@ -58,6 +58,31 @@ def load_config(path: Path) -> dict:
         raise ConfigError("portal.refresh_seconds must be between 10 and 3600")
     if not isinstance(integrations, list):
         raise ConfigError("integrations must be a list")
+    deployment = config.get('deployment')
+    if deployment is not None:
+        if not isinstance(deployment, dict) or set(deployment) - {'dns_resolvers', 'dns_search_domain'}:
+            raise ConfigError('deployment supports only DNS prerequisite metadata')
+        resolvers = deployment.get('dns_resolvers')
+        if resolvers is not None:
+            if not isinstance(resolvers, list) or not 1 <= len(resolvers) <= 4:
+                raise ConfigError('dns_resolvers must contain one to four IP addresses')
+            seen_resolvers = set()
+            for value in resolvers:
+                try:
+                    address = ipaddress.ip_address(value) if isinstance(value, str) else None
+                except ValueError as exc:
+                    raise ConfigError('dns_resolvers require IP address literals') from exc
+                if address is None or address.is_unspecified or address.is_multicast or address in seen_resolvers:
+                    raise ConfigError('dns_resolvers contain an unusable or duplicate address')
+                seen_resolvers.add(address)
+        domain = deployment.get('dns_search_domain')
+        if domain is not None:
+            labels = domain.split('.') if isinstance(domain, str) else []
+            if not domain or len(domain) > 253 or any(
+                not re.fullmatch(r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?', label)
+                for label in labels
+            ):
+                raise ConfigError('dns_search_domain requires a valid DNS name')
     seen: set[str] = set()
     for spec in integrations:
         if not isinstance(spec, dict):

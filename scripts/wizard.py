@@ -21,6 +21,8 @@ def main():
     parser=argparse.ArgumentParser(description='Interactive Cerebro source mapping wizard')
     parser.add_argument('--output',type=Path,required=True,help='private adopter-owned config path, outside this checkout')
     parser.add_argument('--apply',action='store_true',help='save validated config (dry-run by default)')
+    parser.add_argument('--dns-resolver',action='append',default=[],help='adopter DNS resolver IP; repeat for up to four (recorded prerequisite, not applied to OS)')
+    parser.add_argument('--dns-search-domain',help='adopter DNS search domain (recorded prerequisite, not applied to OS)')
     args=parser.parse_args()
     if args.output.exists(): parser.error('output already exists; refuse overwrite')
     if ROOT == args.output or ROOT in args.output.resolve().parents: parser.error('keep adopter config outside public checkout')
@@ -54,10 +56,15 @@ def main():
         spec['summary_paths']=paths
         integrations.append(spec)
     config={'portal':{'title':title,'classification':'Internal','refresh_seconds':60},'integrations':integrations}
+    if args.dns_resolver or args.dns_search_domain:
+        config['deployment']={}
+        if args.dns_resolver: config['deployment']['dns_resolvers']=args.dns_resolver
+        if args.dns_search_domain: config['deployment']['dns_search_domain']=args.dns_search_domain
     with tempfile.TemporaryDirectory() as scratch:
         candidate=Path(scratch)/'config.json'; candidate.write_text(json.dumps(config))
         load_config(candidate)
     print(f'validated feeds={len(integrations)} mode={"apply" if args.apply else "dry-run"}; no feed requests made')
+    if 'deployment' in config: print('DNS prerequisite recorded; configure and verify host DNS separately')
     if args.apply:
         args.output.parent.mkdir(parents=True,exist_ok=True)
         fd=os.open(args.output,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
